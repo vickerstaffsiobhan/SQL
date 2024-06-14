@@ -1,0 +1,142 @@
+/*which tracks appeared in the most playlists? */
+  SELECT COUNT(*) AS 'Playlists', t.Name, pt.TrackId
+  FROM playlist_track pt
+  JOIN tracks t
+  	ON pt.TrackId = t.TrackId
+  GROUP BY 3
+  ORDER BY 1 DESC;
+
+/* which track generated the most revenue? which album, which genre? */
+    /* which track(S) earned the most? */
+    Select ii.TrackId, SUM(ii.UnitPrice) 'Total Revenue per Track', t.Name AS Track, a.Title AS Album, g.Name AS Genre
+    FROM invoice_items AS ii
+    JOIN tracks AS t
+    	ON ii.trackID = t.TrackId
+    JOIN albums AS a
+    	ON t.AlbumId = a.AlbumId
+    JOIN genres AS g
+    	ON t.GenreId = g.GenreId
+    GROUP BY 1
+    ORDER BY 2 DESC;
+  
+  /* which album earned the most? */
+  SELECT SUM(ii.UnitPrice) AS 'Total Revenue per Album', a.Title AS Album, g.Name AS Genre
+  FROM invoice_items AS ii
+  JOIN tracks AS t
+  	ON ii.trackID = t.TrackId
+  JOIN albums AS a
+  	ON t.AlbumId = a.AlbumId
+  JOIN genres AS g
+  	ON t.GenreId = g.GenreId
+  GROUP BY 2
+  ORDER BY 1 DESC;
+  
+  /*which genre?*/
+  Select ROUND(SUM(ii.UnitPrice),2) AS 'Total Revenue per Genre', g.Name AS Genre
+  FROM invoice_items AS ii
+  JOIN tracks AS t
+  	ON ii.trackID = t.TrackId
+  JOIN genres AS g
+  	ON t.GenreId = g.GenreId
+  GROUP BY 2
+  ORDER BY 1 DESC;
+
+    /*I am not sure why I needed 'ROUND' on this one? some unit prices ended up weird. Lets look
+    cant see anythin weird anywhere, maybe just a weird rounding error? */
+    SELECT *
+    FROM genres
+    WHERE Name IS NULL
+
+/* what countries have the highest sales revenue? what percent of total revenue does each country make up? */
+  /* sales revenue per country */
+  SELECT BillingCountry Country, SUM(Total) 'Total Revenue'
+  FROM invoices i
+  GROUP BY 1
+  ORDER BY 2 DESC;
+
+  /* percent of total revenue for each country */
+  WITH total AS (
+  	SELECT SUM(Total) whole
+  	FROM invoices )
+  SELECT i.BillingCountry Country, SUM(i.Total) 'Total Revenue',
+  	ROUND(100* (SUM(i.Total)/total.whole ), 2)'Percent of total'
+  FROM invoices i, total
+  GROUP BY 1
+  ORDER BY 2 DESC;
+
+/* how many customers did each employee support, what is the average revenue for each sale, what is their total sale */
+WITH  whole AS (SELECT i.InvoiceId, i.Total, c.CustomerID, e.EmployeeId, e.FirstName, e.LastName
+FROM invoices i
+JOIN customers c
+	ON i.CustomerID = c.CustomerId
+JOIN employees e
+	ON c.SupportRepId = e.EmployeeID
+)
+SELECT EmployeeID, FirstName, LastName, COUNT(CustomerID) 'Customers Served', ROUND(AVG(Total),2) 'Average Sale' , ROUND(SUM(Total),2) 'Total Sale Revenue'
+FROM whole w
+GROUP BY 1;
+
+/* do longer or shorter albums generate more revenue */
+  /* so this code makes two subtables - one that counts the number of seconds in each album, one that counts the total sales per album */
+  /* it then combines them */
+  WITH track_length AS (
+  SELECT a.AlbumID, a.Title, SUM(t.Milliseconds)/60000 length
+  FROM tracks t
+  JOIN albums a
+  	ON t.AlbumID = a.AlbumId
+  GROUP BY 1),
+  album_sales AS (
+  SELECT t.AlbumId, SUM(ii.UnitPrice * ii.Quantity) total
+  FROM tracks t
+  JOIN invoice_items ii
+  	ON t.TrackId = ii.TrackID
+  GROUP BY 1)
+  SELECT tl.Title, length 'length in seconds', total 'total revenue'
+  FROM track_length tl
+  JOIN album_sales a_s
+  	ON tl.AlbumID = a_s.AlbumID
+  GROUP BY 1
+  ORDER BY 3 DESC;
+
+
+  /*however looking at the question, it seems to actually want me to identify how many TRACKS are in each album, and use that as an identifier for length */
+  /* so here is that */
+  WITH length AS (
+  	SELECT COUNT(*) no_of_tracks, AlbumID
+  	FROM tracks
+  	GROUP BY 2),
+  album_sales AS (
+  SELECT t.AlbumId, SUM(ii.UnitPrice * ii.Quantity) total
+  FROM tracks t
+  JOIN invoice_items ii
+  	ON t.TrackId = ii.TrackID
+  GROUP BY 1)
+  SELECT l.no_of_tracks 'Album length in tracks', AVG(a_s.total) 'Average revenue'
+  FROM length l
+  JOIN album_sales a_s
+  	ON l.AlbumID = a_s.AlbumID
+  GROUP BY 1
+  ORDER BY 1 DESC;
+
+/* is the number of times a track appears in a playlsit a good indicator of sales */
+WITH plays AS(
+	SELECT TrackId, COUNT(*) playlist_plays
+	FROM playlist_track
+	GROUP BY 1)
+SELECT playlist_plays 'Number of times appearing in a playlist', ROUND(AVG(Total),2) 'Average sales'
+FROM invoice_items ii
+JOIN plays p
+	ON ii.TrackId = p.TrackId
+JOIN invoices i
+	ON ii.InvoiceId = i.InvoiceID
+GROUP BY 1;
+
+/* how much revenue is generated each year and what is the percent change from previous year */
+WITH yearly_revenue AS (
+SELECT strftime ('%Y', InvoiceDate) year, SUM(Total) yearly_revenue
+FROM invoices
+GROUP BY 1)
+SELECT year, yearly_revenue 'Total Revenue per year', LAG(yearly_revenue, 1, 0) OVER (
+	ORDER BY year) 'Revenue from previous year' , ROUND(100*(yearly_revenue/LAG(yearly_revenue, 1, 0) OVER (
+	ORDER BY year)-1),2) 'Revenue change in percent'
+FROM yearly_revenue yr
